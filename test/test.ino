@@ -1,6 +1,3 @@
-#include <TORICA_WebServer.h>
-#include <index.h>
-
 // 最終更新日: 20250517
 
 // 直感的な入力量評価のため，ラダー入力を百分率に変更
@@ -17,9 +14,6 @@
 #include <Arduino.h>
 #include <IcsHardSerialClass.h>
 
-// ピン指定
-const int POT = 28; // ポテンショメータ
-
 // サーボモータの初期設定
 const byte EN_PIN = 2; // ENピンの指定
 const long BAUDRATE = 115200; // 通信速度
@@ -31,7 +25,6 @@ IcsHardSerialClass krs(&Serial1,EN_PIN,BAUDRATE,TIMEOUT);
 void setup() {
   // ピン割り当て
   pinMode(LED_BUILTIN, OUTPUT); // 動作確認用LED
-  pinMode(POT,INPUT);
   // サーボモータの通信初期設定
   // Serial1.setTX(0);
   // Serial1.setRX(1);
@@ -39,8 +32,6 @@ void setup() {
   // Serial1.setTimeout(10);
   krs.begin();
   
-  pinMode(POT, INPUT);
-  analogReadResolution(12);
   // デバッグ用シリアルを開始
   Serial.begin(115200, SERIAL_8E1);
   Serial.println("SERIAL READY");
@@ -53,27 +44,28 @@ void setup() {
   digitalWrite(LED_BUILTIN, HIGH);
 }
 
-const float out_min = 7500.0 - (4000.0*15.0/135.0);
-const float out_max = 7500.0 + (4000.0*15.0/135.0);
-const float in_min = (float)0 + 1000;
-const float in_max = (float)4095 - 1000;
+
+float servo_pos = 7500.0;
+int inputAngle = 0;
 
 void loop() {
-  float pot = (float)analogRead(POT);
 
-  float servo_pos = out_min + (pot - in_min)*(out_max - out_min)/(in_max - in_min);
+  if (Serial.available()) {
+    String str = Serial.readStringUntil('\n');
+    inputAngle = str.toInt();
+    int diffPos = (float)inputAngle * 4000.0 / 135.0;
+    servo_pos = 7500 + diffPos;
+  }
 
-  if (servo_pos < out_min) {
-    servo_pos = out_min;
-  }
-  else if (out_max < servo_pos) {
-    servo_pos = out_max;
-  }
-  
-  Serial.print(pot);
-  Serial.print(" : ");
+
   Serial.print(servo_pos);
-  Serial.print("\n");
+  Serial.print(" : ");
+  Serial.print(inputAngle);
+  Serial.println("deg");
+
+  // Serial.print("RealAngle -> ");
+  // Serial.println(realAngle);
+  
 
   // サーボ（ID:0）をservo_posだけ駆動
   krs.setPos(0, servo_pos);
