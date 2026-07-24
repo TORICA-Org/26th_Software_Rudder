@@ -42,6 +42,19 @@ void setup() {
 
   delay(5);
   digitalWrite(LED_BUILTIN, HIGH);
+
+  delay(5000);
+  digitalWrite(LED_BUILTIN, LOW);
+  krs.setTmp(0, 1);
+
+  digitalWrite(LED_BUILTIN, HIGH);
+  krs.setPos(0, 7000);
+  delay(2000);
+  digitalWrite(LED_BUILTIN, LOW);
+  krs.setPos(0, 8000);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, HIGH);
+  krs.setPos(0, 7500);
 }
 
 

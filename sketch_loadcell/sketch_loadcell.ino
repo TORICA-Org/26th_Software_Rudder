@@ -10,8 +10,8 @@ constexpr float MAX_ANGLE = 15/2;
 const uint8_t EN_PIN = D2;
 const int BAUDLATE = 115200;
 const int TIMEOUT = 100;
-SerialPIO myserial(D7, D6);
-IcsHardSerialClass krs(&myserial, EN_PIN, BAUDLATE, TIMEOUT);
+// SerialPIO myserial(D7, D6);
+IcsHardSerialClass krs(&Serial1, EN_PIN, BAUDLATE, TIMEOUT);
 
 constexpr float loadcell_min = 1000;
 constexpr float loadcell_max = 2300;
@@ -23,6 +23,8 @@ void setup() {
   pinMode(LOADCELL_L, INPUT);
   pinMode(LOADCELL_R, INPUT);
   pinMode(POT, INPUT);
+  Serial1.setTX(D6);
+  Serial1.setRX(D7);
   krs.begin();
   Serial.begin(115200);
   delay(3000);
