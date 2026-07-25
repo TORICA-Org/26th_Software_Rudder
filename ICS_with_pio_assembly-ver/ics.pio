@@ -1,0 +1,93 @@
+; ----------------------------------------------------------------------------
+; ics.pio
+; 近藤科学 ICS 3.5/3.6 サーボ用 半二重(Half-Duplex) PIOアセンブラ
+;
+; RP2040の PIO を利用し、SIG線1本（追加回路・レベル変換回路のダイオード等不要）
+; で完全な半二重 8E1 (8 data bits, Even parity, 1 Stop bit) 通信を実現します。
+; 
+; 【仕組み：オープンドレイン制御】
+; 出力は常に `0` (LOW) に固定しておき、
+; ピンの入出力方向 (pindirs) を 0 (Hi-Z) / 1 (Output) で切り替えることで、
+; 送信完了後も自動で入力（Hi-Z）になり、サーボからの返信と衝突しません。
+; ----------------------------------------------------------------------------
+
+.program ics_tx
+.side_set 1 opt pindirs
+
+; C++ 側からは 10ビット (bit0~7: data, bit8: parity, bit9: stop bit (1)) が OSR に入れられます
+; Start bit (0) は PIO 内で固定で出力します
+
+public start:
+    pull block          side 0      ; C++からFIFOにデータが来るまで待機。待機中はpindirs=0(Hi-Z=HIGH)
+    set x, 9            side 1 [7]  ; Start bit: pindirs=1(LOW出力) にして 8 cycles 待つ (命令1 + delay7 = 8)
+
+bitloop:
+    out pindirs, 1         [6]      ; OSRから1bitをpindirsへ出力 (0:LOW出力, 1:Hi-Z)。 (命令1 + delay6 = 7)
+    jmp x-- bitloop                 ; ループ (1 cycle)。計 8 cycles / bit (10ビット分繰り返す)
+
+    ; 10ビット送信完了後、次の pull 待ちで自動的に side 0 (Hi-Z) に戻る
+
+
+.program ics_rx
+
+; 待機中は何もせずピンを監視するだけ
+; Start bitの立ち下がり(HIGH->LOW)を待つ。
+
+public start:
+    wait 0 pin 0                    ; Start bit の立ち下がりまで待機 (ピンが 0 になったら次へ)
+    set x, 9               [10]     ; 10ビット受信する。サンプリングをビットの中央に合わせるため
+                                    ; 1.5 bit 時間（8 + 4 = 12 cycles）待機する (set 1 + delay 10 + in 1 = 12)
+
+bitloop:
+    in pins, 1             [6]      ; ピン状態を 1 bit サンプリングし ISR へ (命令1 + delay6 = 7)
+    jmp x-- bitloop                 ; ループ (1 cycle)。計 8 cycles / bit
+
+    push noblock                    ; 10ビット受信完了したら、ISR のデータを C++ 側の FIFO に送る
+
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+// TX PIO の初期化ヘルパー
+static inline void ics_tx_program_init(PIO pio, uint sm, uint offset, uint pin, uint baud) {
+    pio_sm_config c = ics_tx_program_get_default_config(offset);
+    
+    // ピンの初期設定 (オープンドレインとして使用するため出力値を0に固定)
+    pio_gpio_init(pio, pin);
+    gpio_put(pin, 0);
+
+    // out 命令および side_set 命令で使うピンを設定
+    sm_config_set_out_pins(&c, pin, 1);
+    sm_config_set_sideset_pins(&c, pin);
+    
+    // OSR（出力シフトレジスタ）の設定: 右シフト(LSB first), Auto-pull無効, 32bit
+    sm_config_set_out_shift(&c, true, false, 32);
+
+    // クロック分周器の設定: 1bit = 8 cycles になるように調整
+    float div = (float)clock_get_hz(clk_sys) / (baud * 8.0f);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+
+// RX PIO の初期化ヘルパー
+static inline void ics_rx_program_init(PIO pio, uint sm, uint offset, uint pin, uint baud) {
+    pio_sm_config c = ics_rx_program_get_default_config(offset);
+    
+    // ピンの初期設定
+    pio_gpio_init(pio, pin);
+
+    // in 命令および jmp(wait) 命令で使うピンを設定
+    sm_config_set_in_pins(&c, pin);
+    sm_config_set_jmp_pin(&c, pin);
+
+    // ISR（入力シフトレジスタ）の設定: 右シフト(LSB first), Auto-push無効, 32bit
+    sm_config_set_in_shift(&c, true, false, 32);
+
+    // クロック分周器の設定: 1bit = 8 cycles になるように調整
+    float div = (float)clock_get_hz(clk_sys) / (baud * 8.0f);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
